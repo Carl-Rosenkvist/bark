@@ -12,8 +12,9 @@ class CollectorAccessor : public Accessor {
 public:
     std::unordered_map<std::string, std::vector<double>> doubles;
     std::unordered_map<std::string, std::vector<int32_t>> ints;
-
+    std::vector<int> event_sizes;
     void on_particle_block(const ParticleBlock& block) override {
+        event_sizes.push_back(block.npart);
         for (size_t i = 0; i < block.npart; ++i) {
             for (const auto& [name, info] : quantity_string_map) {
                 if (!layout) throw std::runtime_error("Layout not set");
@@ -45,7 +46,10 @@ public:
     const std::vector<int32_t>& get_int_array(const std::string& name) const {
         return ints.at(name);
     }
+    const std::vector<int>& get_event_sizes() const {return event_sizes;}
+
 };
+
 
 
 
@@ -92,6 +96,11 @@ PYBIND11_MODULE(binaryreader, m) {
             const auto& vec = self.get_double_array(name);
             return py::array(vec.size(), vec.data());
         })
+        .def("get_event_sizes", [](const CollectorAccessor& self) {
+            const auto& vec = self.get_event_sizes();
+            return py::array(vec.size(), vec.data());
+        })
+
         .def("get_int_array", [](const CollectorAccessor& self, const std::string& name) {
             const auto& vec = self.get_int_array(name);
             return py::array(vec.size(), vec.data());

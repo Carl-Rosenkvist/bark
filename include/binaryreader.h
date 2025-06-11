@@ -120,7 +120,7 @@ struct Header {
 // Declare your enum class
 enum class Quantity {
     MASS, P0, PX, PY, PZ,
-    PDGID, NCOLL,
+    PDGID, NCOLL, CHARGE
     // ... more
 };
 
@@ -151,6 +151,7 @@ const std::unordered_map<std::string, QuantityInfo> quantity_string_map = {
     {"pz",     {Quantity::PZ,     QuantityType::Double}},
     {"pdgid",  {Quantity::PDGID,  QuantityType::Int32}},
     {"ncoll",  {Quantity::NCOLL,  QuantityType::Int32}},
+    {"charge",  {Quantity::CHARGE,  QuantityType::Int32}},
     // ... more
 };
 
