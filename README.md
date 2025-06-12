@@ -93,3 +93,21 @@ int main(int argc, char* argv[]) {
 }
 
 ```
+
+## Python usage
+```py 
+from binaryreader import BinaryReader, CollectorAccessor
+import numpy as np
+
+reader = BinaryReader("particles_binary.bin", ["pdg", "pz", "p0"], CollectorAccessor())
+reader.read()
+
+accessor = reader.accessor
+pz = accessor.get_double_array("pz")
+e  = accessor.get_double_array("p0")
+pdg = accessor.get_int_array("pdg")
+
+y = 0.5 * np.log((e + pz) / (e - pz))
+
+
+```
