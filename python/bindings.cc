@@ -52,6 +52,54 @@ public:
 
 
 
+class DictCollectorAccessor : public Accessor {
+public:
+    std::vector<py::dict> collected_particles;
+
+    void on_particle_block(const ParticleBlock& block) override {
+        py::gil_scoped_acquire gil;
+
+        for (size_t i = 0; i < block.npart; ++i) {
+            const auto& particle = block.particles[i];
+            py::dict d;
+
+            for (const auto& [quantity, offset] : *layout) {
+                // Find name and type for this quantity
+                auto name_it = std::find_if(
+                    quantity_string_map.begin(), quantity_string_map.end(),
+                    [quantity](const auto& pair) {
+                        return pair.second.quantity == quantity;
+                    });
+
+                if (name_it == quantity_string_map.end()) continue;
+                const std::string& name = name_it->first;
+                const QuantityInfo& info = name_it->second;
+
+                if (info.type == QuantityType::Double) {
+                    double val;
+                    std::memcpy(&val, particle.data() + offset, sizeof(double));
+                    d[py::str(name)] = val;
+                } else if (info.type == QuantityType::Int32) {
+                    int32_t val;
+                    std::memcpy(&val, particle.data() + offset, sizeof(int32_t));
+                    d[py::str(name)] = val;
+                }
+            }
+
+            collected_particles.push_back(std::move(d));
+        }
+    }
+
+    py::list get_particle_dicts() const {
+        py::list l;
+        for (const auto& d : collected_particles) {
+            l.append(d);
+        }
+        return l;
+    }
+};
+
+
 
 
 
@@ -89,6 +137,9 @@ PYBIND11_MODULE(binaryreader, m) {
         .def(py::init<const std::string&, const std::vector<std::string>&, std::shared_ptr<Accessor>>())
         .def("read", &BinaryReader::read);
 
+  py::class_<DictCollectorAccessor, Accessor, std::shared_ptr<DictCollectorAccessor>>(m, "DictCollectorAccessor")
+    .def(py::init<>())
+    .def("get_particle_dicts", &DictCollectorAccessor::get_particle_dicts);
 
     py::class_<CollectorAccessor, Accessor, std::shared_ptr<CollectorAccessor>>(m, "CollectorAccessor")
         .def(py::init<>())
