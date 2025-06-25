@@ -1,19 +1,19 @@
-# smash-binary-reader
+# BARK
 
-A simple and extensible C++/Python library for reading and analyzing SMASH binary output files.
+A simple and extensible C++/Python library for reading and analyzing binary particle output files.
 
 ## Features
 
-- C++ header-based binary file reader for SMASH particle data
+- C++ header-based binary file reader for particle data
 - Plugin-style extensible analysis system (via registry macros)
 - Optional Python bindings via `pybind11`
 - Histogramming utilities
 - No external dependencies (except optionally `pybind11`)
-
+- Devloped primarly for SMASH
 ## Structure
 
 ```
-smash-binary-reader/
+bark/
 ├── include/
 │   ├── binaryreader.h
 │   ├── analysis.h
@@ -37,11 +37,7 @@ cd build
 cmake ..
 make
 ```
-
-```bash
-./binary_reader path/to/file.dat
-```
-
+``
 This reads the binary file and dispatches particle blocks to any registered analysis.
 
 ## Writing Analyses
@@ -96,13 +92,12 @@ int main(int argc, char* argv[]) {
 
 ## Python usage
 ```py 
-from binaryreader import BinaryReader, CollectorAccessor
+from bark import BinaryReader, CollectorAccessor
 import numpy as np
-
-reader = BinaryReader("particles_binary.bin", ["pdg", "pz", "p0"], CollectorAccessor())
+accessor = CollectorAccessor()
+reader = BinaryReader("particles_binary.bin", ["pdg", "pz", "p0"], accessor)
 reader.read()
 
-accessor = reader.accessor
 pz = accessor.get_double_array("pz")
 e  = accessor.get_double_array("p0")
 pdg = accessor.get_int_array("pdg")

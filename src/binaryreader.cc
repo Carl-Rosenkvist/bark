@@ -131,7 +131,7 @@ BinaryReader::BinaryReader(const std::string& filename,
 void BinaryReader::read() {
     header.read(file);
     char blockType;
-
+    if(accessor) accessor->on_header(header);
     while (file.read(&blockType, sizeof(blockType))) {
         switch (blockType) {
             case 'p': {

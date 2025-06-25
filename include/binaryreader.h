@@ -117,9 +117,10 @@ public:
 
     int32_t get_int(const std::string& name, const ParticleBlock& block, size_t i) const;
     double get_double(const std::string& name, const ParticleBlock& block, size_t i) const;
-
+    virtual void on_header(Header& header_in){};
 protected:
     const std::unordered_map<Quantity, size_t>* layout = nullptr;
+    Header header;
 };
 
 

@@ -23,7 +23,7 @@ public:
         counts_[bin] += weight;
     }
 
-    double get_bin_center(size_t i) const {
+    double bin_center(size_t i) const {
         if (i >= bins_) throw std::out_of_range("Invalid bin index");
         return min_ + (i + 0.5) * bin_width_;
     }
@@ -38,19 +38,35 @@ public:
     void print(std::ostream& out = std::cout) const {
         out << std::fixed << std::setprecision(4);
         for (size_t i = 0; i < bins_; ++i) {
-            out << get_bin_center(i) << "\t" << counts_[i] << "\n";
+            out << bin_center(i) << "\t" << counts_[i] << "\n";
         }
     }
 
-    void merge(const Histogram1D& other) {
+double bin_width() const { return bin_width_; }
+
+void scale(double factor) {
+    for (double& count : counts_) {
+        count *= factor;
+    }
+}
+
+double raw_bin_content(size_t i) const {
+    return get_bin_count(i); // just for naming consistency
+}
+
+double bin_content(size_t i) const {
+    return get_bin_count(i); // you could add smoothing, etc., later if needed
+}
+  
+    Histogram1D& operator+=(const Histogram1D& other) {
         if (bins_ != other.bins_ || min_ != other.min_ || max_ != other.max_) {
-            throw std::runtime_error("Cannot merge histograms with different binning.");
+            throw std::runtime_error("Cannot add histograms with different binning.");
         }
         for (size_t i = 0; i < bins_; ++i) {
             counts_[i] += other.counts_[i];
         }
+            return *this;
     }
-
 private:
     double min_, max_, bin_width_;
     size_t bins_;

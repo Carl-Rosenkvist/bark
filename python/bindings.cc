@@ -1,11 +1,52 @@
 // bindings.cpp
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
-#include "binaryreader.h"
-
 #include <pybind11/numpy.h>
+
+#include <filesystem>
+
+
+#include "binaryreader.h"
+#include "analysis.h"
+#include "analysisregister.h"
+
+
+
+
 namespace py = pybind11;
 
+
+#include <optional>
+
+
+#include <sstream>
+
+std::string run_analysis_file(const std::string& filepath,
+                              const std::string& analysis_name,
+                              const std::vector<std::string>& quantities,
+                              std::optional<std::string> save_path = std::nullopt,
+                              bool print_output = true) {
+    auto dispatcher = std::make_shared<DispatchingAccessor>();
+    auto analysis = AnalysisRegistry::instance().create(analysis_name);
+    if (!analysis) {
+        throw std::runtime_error("Unknown analysis '" + analysis_name + "'");
+    }
+
+    dispatcher->register_analysis(analysis);
+    BinaryReader reader(filepath, quantities, dispatcher);
+    reader.read();
+
+    if (save_path) {
+        analysis->save(*save_path);
+    }
+
+    std::ostringstream output;
+    if (print_output) {
+        analysis->print_result_to(output);
+    }
+
+    return output.str();
+}
 
 
 class CollectorAccessor : public Accessor {
@@ -117,7 +158,17 @@ public:
     }
 };
 
-PYBIND11_MODULE(binaryreader, m) {
+PYBIND11_MODULE(_bindings, m) {
+
+
+
+m.def("run_analysis_file", &run_analysis_file,
+      py::arg("filepath"),
+      py::arg("analysis_name"),
+      py::arg("quantities"),
+      py::arg("save_path") = std::nullopt,
+      py::arg("print_output") = true);
+
     py::class_<ParticleBlock>(m, "ParticleBlock")
         .def_readonly("event_number", &ParticleBlock::event_number)
         .def_readonly("ensamble_number", &ParticleBlock::ensamble_number)
