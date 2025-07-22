@@ -54,6 +54,40 @@ std::string label_from_key(const MergeKey& key) {
     return label;
 }
 
+void save_all_to_yaml(const std::string& filename,
+                      const std::unordered_map<MergeKey, std::shared_ptr<Analysis>, MergeKeyHash>& analysis_map) {
+    YAML::Emitter out;
+    out << YAML::BeginMap;
+
+    for (const auto& [key, analysis] : analysis_map) {
+        std::string label = label_from_key(key);
+        out << YAML::Key << label;
+        out << YAML::Value << YAML::BeginMap;
+
+        out << YAML::Key << "smash_version" << YAML::Value << analysis->get_smash_version();
+
+        out << YAML::Key << "merge_keys" << YAML::Value << YAML::BeginMap;
+        for (const auto& [k, v] : key) {
+            out << YAML::Key << k << YAML::Value;
+            to_yaml(out, v);
+        }
+        out << YAML::EndMap;
+
+        out << YAML::Key << "data" << YAML::Value << YAML::BeginMap;
+        for (const auto& [k, v] : analysis->get_data()) {
+            out << YAML::Key << k << YAML::Value;
+            to_yaml(out, v);
+        }
+        out << YAML::EndMap;
+
+        out << YAML::EndMap; // end of one analysis block
+    }
+
+    out << YAML::EndMap;
+
+    std::ofstream fout(filename);
+    fout << out.c_str();
+}
 int main(int argc, char* argv[]) {
     if (argc < 4) {
         std::cerr << "Usage: " << argv[0]
@@ -147,11 +181,12 @@ int main(int argc, char* argv[]) {
         analysis->finalize();
         std::string label = label_from_key(key);
 
+   
         if (save_output) {
-            std::filesystem::path filename = output_folder / (label.empty() ? "output" : label);
-            analysis->save(filename.string());
+            std::filesystem::path filename = output_folder / (analysis_name + ".yaml");
+            
+            save_all_to_yaml(filename.string(), analysis_map);
         }
-
         if (print_output) {
             std::cout << "=== Result for " << (label.empty() ? "(no key)" : label) << " ===\n";
             analysis->print_result_to(std::cout);

@@ -6,6 +6,8 @@
 #include <iomanip>
 
 #include "analysisregister.h"
+
+
 class RapidityHistogramAnalysis : public Analysis {
 public:
     RapidityHistogramAnalysis()
@@ -60,38 +62,6 @@ public:
         }
     }
 
-   
-
-void save(const std::string& dir_path) override {
-    std::filesystem::create_directories(dir_path);  // Ensure output directory exists
-
-    int n_events = std::get<int>(data.at("n_events"));
-    for (int pdg : selected_pdgs) {
-        std::string key = "rapidity_pdg_" + std::to_string(pdg);
-        const auto& hist = std::get<Histogram1D>(data.at(key));
-
-        std::filesystem::path file_path = std::filesystem::path(dir_path) / (key + ".csv");
-        std::ofstream out(file_path);
-
-        if (!out) {
-            std::cerr << "Error: Failed to write to " << file_path << "\n";
-            continue;
-        }
-        out << "#"+smash_version << "\n";
-        out << "y,dN/dy,error\n";
-        for (int i = 0; i < hist.num_bins(); ++i) {
-            double y_center = hist.bin_center(i);
-            double count = hist.raw_bin_content(i);
-            double val = hist.bin_content(i);
-            double err = (count > 0) ? std::sqrt(count) / (hist.bin_width() * n_events) : 0.0;
-
-            out << std::fixed << std::setprecision(6)
-                << y_center << "," << val << "," << err << "\n";
-        }
-
-        std::cout << "Saved: " << file_path << "\n";
-    }
-}
 private:
     std::vector<int> selected_pdgs;
     double y_min;

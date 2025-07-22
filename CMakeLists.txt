@@ -13,6 +13,10 @@ file(GLOB ANALYSIS_FILES analyses/*.cc)
 # Build C++ binary
 add_executable(binary_reader ${SRC_FILES} ${ANALYSIS_FILES})
 
+# Find and link yaml-cpp
+find_package(yaml-cpp REQUIRED)
+target_link_libraries(binary_reader PRIVATE yaml-cpp)
+
 # Optional pybind11 binding
 option(WITH_PYBIND "Build Python bindings with pybind11" OFF)
 
@@ -24,6 +28,6 @@ if(WITH_PYBIND)
         ${ANALYSIS_FILES}
     )
     target_include_directories(_bindings PRIVATE include)
-    target_link_libraries(_bindings PRIVATE pybind11::module)
+    target_link_libraries(_bindings PRIVATE pybind11::module yaml-cpp)
     set_target_properties(_bindings PROPERTIES OUTPUT_NAME "_bindings")
 endif()
