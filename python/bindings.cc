@@ -2,7 +2,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/numpy.h>
-
+#include "utils.h"
 #include <filesystem>
 
 
@@ -21,31 +21,62 @@ namespace py = pybind11;
 
 #include <sstream>
 
-std::string run_analysis_file(const std::string& filepath,
-                              const std::string& analysis_name,
-                              const std::vector<std::string>& quantities,
-                              std::optional<std::string> save_path = std::nullopt,
-                              bool print_output = true) {
-    auto dispatcher = std::make_shared<DispatchingAccessor>();
-    auto analysis = AnalysisRegistry::instance().create(analysis_name);
-    if (!analysis) {
-        throw std::runtime_error("Unknown analysis '" + analysis_name + "'");
+void run_analysis(const std::vector<std::pair<std::string, std::string>>& file_and_meta,
+                  const std::string& analysis_name,
+                  const std::vector<std::string>& quantities,
+                  bool save_output = true,
+                  bool print_output = true,
+                  const std::string& output_folder = ".")
+{
+    std::vector<std::pair<std::string, MergeKey>> input_files;
+    for (const auto& [file, meta] : file_and_meta) {
+        input_files.emplace_back(file, parse_merge_key(meta));
     }
 
-    dispatcher->register_analysis(analysis);
-    BinaryReader reader(filepath, quantities, dispatcher);
-    reader.read();
-
-    if (save_path) {
-        analysis->save(*save_path);
+    if (quantities.empty()) {
+        throw std::runtime_error("No quantities provided");
     }
 
-    std::ostringstream output;
-    if (print_output) {
-        analysis->print_result_to(output);
+    if (save_output && !std::filesystem::exists(output_folder)) {
+        std::filesystem::create_directories(output_folder);
     }
 
-    return output.str();
+    std::unordered_map<MergeKey, std::shared_ptr<Analysis>, MergeKeyHash> analysis_map;
+
+    for (const auto& [path, key] : input_files) {
+        auto analysis = AnalysisRegistry::instance().create(analysis_name);
+        if (!analysis) {
+            throw std::runtime_error("Unknown analysis: " + analysis_name);
+        }
+        analysis->set_merge_keys(key);
+
+        auto dispatcher = std::make_shared<DispatchingAccessor>();
+        dispatcher->register_analysis(analysis);
+
+        BinaryReader reader(path, quantities, dispatcher);
+        reader.read();
+
+        auto& existing = analysis_map[key];
+        if (existing) {
+            *existing += *analysis;
+        } else {
+            analysis_map[key] = std::move(analysis);
+        }
+    }
+
+    for (const auto& [key, analysis] : analysis_map) {
+        analysis->finalize();
+        std::string label = label_from_key(key);
+
+        if (save_output) {
+            std::filesystem::path filename = std::filesystem::path(output_folder) / (analysis_name + ".yaml");
+            save_all_to_yaml(filename.string(), analysis_map);
+        }
+        if (print_output) {
+            std::cout << "=== Result for " << (label.empty() ? "(no key)" : label) << " ===\n";
+            analysis->print_result_to(std::cout);
+        }
+    }
 }
 
 
@@ -158,16 +189,16 @@ public:
     }
 };
 
-PYBIND11_MODULE(_bindings, m) {
+PYBIND11_MODULE(bark, m) {
 
-
-
-m.def("run_analysis_file", &run_analysis_file,
-      py::arg("filepath"),
+m.def("run_analysis", &run_analysis,
+      py::arg("file_and_meta"),
       py::arg("analysis_name"),
       py::arg("quantities"),
-      py::arg("save_path") = std::nullopt,
-      py::arg("print_output") = true);
+      py::arg("save_output") = true,
+      py::arg("print_output") = true,
+      py::arg("output_folder") = ".");
+
 
     py::class_<ParticleBlock>(m, "ParticleBlock")
         .def_readonly("event_number", &ParticleBlock::event_number)

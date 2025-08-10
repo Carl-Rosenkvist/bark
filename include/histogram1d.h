@@ -17,22 +17,27 @@ public:
         bin_width_ = (max - min) / bins;
     }
 
-    void fill(double value, double weight = 1.0) {
-        if (value < min_ || value >= max_) return; // ignore out-of-range
-        size_t bin = static_cast<size_t>((value - min_) / bin_width_);
-        counts_[bin] += weight;
-    }
-
+    
+bool fill(double value, double weight = 1.0) {
+    if (value < min_ || value >= max_) return false;
+    size_t bin = static_cast<size_t>((value - min_) / bin_width_);
+    counts_[bin] += weight;
+    return true;
+}
     double bin_center(size_t i) const {
         if (i >= bins_) throw std::out_of_range("Invalid bin index");
         return min_ + (i + 0.5) * bin_width_;
     }
-
+    
     double get_bin_count(size_t i) const {
         if (i >= bins_) throw std::out_of_range("Invalid bin index");
         return counts_[i];
     }
 
+double bin_edge(size_t i) const {
+    if (i > bins_) throw std::out_of_range("Invalid bin edge index");
+    return min_ + i * bin_width_;
+}
     size_t num_bins() const { return bins_; }
 
     void print(std::ostream& out = std::cout) const {
@@ -67,10 +72,20 @@ double bin_content(size_t i) const {
         }
             return *this;
     }
+
+
+
 private:
     double min_, max_, bin_width_;
     size_t bins_;
     std::vector<double> counts_;
 };
 
+inline bool operator==(const Histogram1D& lhs, const Histogram1D& rhs) {
+    return false;
+}
+
+inline bool operator!=(const Histogram1D& lhs, const Histogram1D& rhs) {
+    return !(lhs == rhs);
+}
 #endif // HISTOGRAM1D_H

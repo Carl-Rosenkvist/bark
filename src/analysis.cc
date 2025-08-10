@@ -14,32 +14,80 @@ std::size_t MergeKeyHash::operator()(const MergeKey& key) const {
     return h;
 }
 
-// Merge logic
-void merge_data(Data& a, const Data& b) {
-    if (a.index() != b.index()) {
-        throw std::runtime_error("Mismatched types in Data merge");
+
+
+
+
+void merge_values(Data& a_val, const Data& b_val, const std::string& context) {
+    
+if (std::holds_alternative<std::monostate>(a_val)) {
+    a_val = b_val;
+    return;
+}
+    if (std::holds_alternative<std::monostate>(b_val)) {
+        return;
     }
 
-    std::visit([&](auto& lhs, const auto& rhs) {
-        using L = std::decay_t<decltype(lhs)>;
-        using R = std::decay_t<decltype(rhs)>;
+    if (a_val.index() != b_val.index()) {
+        return;
+    }
 
-        if constexpr (std::is_same_v<L, R>) {
-            if constexpr (std::is_same_v<L, int> || std::is_same_v<L, double>) {
-                lhs += rhs;
-            } else if constexpr (std::is_same_v<L, std::vector<int>> || std::is_same_v<L, std::vector<double>>) {
-                lhs.insert(lhs.end(), rhs.begin(), rhs.end());
-            } else if constexpr (std::is_same_v<L, Histogram1D>) {
-                lhs += rhs;
-            } else {
-                throw std::runtime_error("Unsupported type in Data variant");
-            }
+    std::visit([&](auto& lhs_val) {
+        using T = std::decay_t<decltype(lhs_val)>;
+
+        const auto& rhs_val = std::get<T>(b_val);
+
+        if constexpr (std::is_same_v<T, int> || std::is_same_v<T, double>) {
+            lhs_val += rhs_val;
+
+        } else if constexpr (std::is_same_v<T, std::vector<int>> || std::is_same_v<T, std::vector<double>>) {
+            lhs_val.insert(lhs_val.end(), rhs_val.begin(), rhs_val.end());
+
+        } else if constexpr (std::is_same_v<T, Histogram1D>) {
+            lhs_val += rhs_val;
+
         } else {
-            throw std::runtime_error("Mismatched internal types in Data variant");
+            // Only merge if exactly equal
+            if (lhs_val != rhs_val) {
+                std::cerr << "❌ merge_values: Conflicting non-leaf values in '" << context << "'\n";
+            }
         }
-    }, a, b);
+    }, a_val);
 }
 
+
+
+void merge_data(DataNode& a, const DataNode& b) {
+    if (a.name.empty()) a.name = b.name;
+    else if (!b.name.empty() && a.name != b.name) {
+        std::cerr << "⚠️ merge_data: name mismatch: '" << a.name << "' vs '" << b.name << "'\n";
+    }
+
+    // Promote empty node
+    if (std::holds_alternative<std::monostate>(a.value) && a.subdata.empty()) {
+        a = b;
+        return;
+    }
+
+    const bool a_leaf = a.is_leaf();
+    const bool b_leaf = b.is_leaf();
+
+    if (a_leaf && b_leaf) {
+        merge_values(a.value, b.value, a.name);
+    } else if (!a_leaf && !b_leaf) {
+        if (!std::holds_alternative<std::monostate>(a.value) &&
+            !std::holds_alternative<std::monostate>(b.value) &&
+            a.value != b.value) {
+            std::cerr << "❌ merge_data: root value mismatch in '" << a.name << "'\n";
+        }
+    } else if (a_leaf != b_leaf) {
+        std::cerr << "❌ merge_data: mixing leaf/non-leaf nodes in '" << a.name << "'\n";
+    }
+
+    for (const auto& [k, v_sub] : b.subdata) {
+        merge_data(a.subdata[k], v_sub);
+    }
+}
 // Print logic
 void print_data(std::ostream& os, const Data& d) {
     std::visit([&](const auto& val) {
@@ -73,20 +121,28 @@ void to_yaml(YAML::Emitter& out, const Data& d) {
         if constexpr (std::is_same_v<T, int> || std::is_same_v<T, double>) {
             out << val;
 
-        } else if constexpr (std::is_same_v<T, std::vector<int>> || std::is_same_v<T, std::vector<double>>) {
+        } else if constexpr (std::is_same_v<T, std::vector<int>> ||
+                             std::is_same_v<T, std::vector<double>>) {
             out << YAML::BeginSeq;
             for (const auto& item : val) out << item;
             out << YAML::EndSeq;
 
         } else if constexpr (std::is_same_v<T, Histogram1D>) {
             out << YAML::BeginMap;
-            std::vector<double> bins, values;
+
+            std::vector<double> edges;   edges.reserve(val.num_bins() + 1);
+            std::vector<double> counts;  counts.reserve(val.num_bins());
+
             for (size_t i = 0; i < val.num_bins(); ++i) {
-                bins.push_back(val.bin_center(i));
-                values.push_back(val.get_bin_count(i));
+                edges.push_back(val.bin_edge(i));         // left edge of bin i
+                counts.push_back(val.get_bin_count(i));   // count of bin i
             }
-            out << YAML::Key << "bins" << YAML::Value << bins;
-            out << YAML::Key << "values" << YAML::Value << values;
+            if (val.num_bins() > 0) {
+                edges.push_back(val.bin_edge(val.num_bins())); // rightmost edge
+            }
+
+            out << YAML::Key << "bins"   << YAML::Value << edges;   // length = N+1
+            out << YAML::Key << "values" << YAML::Value << counts;  // length = N
             out << YAML::EndMap;
 
         } else {
@@ -94,6 +150,28 @@ void to_yaml(YAML::Emitter& out, const Data& d) {
         }
     }, d);
 }
+
+
+
+void to_yaml(YAML::Emitter& out, const DataNode& node) {
+    out << YAML::BeginMap;
+
+    // If the node has a value (i.e. is a leaf), emit it directly under "value"
+    if (!std::holds_alternative<std::monostate>(node.value)) {
+        out << YAML::Key << "value" << YAML::Value;
+        to_yaml(out, node.value);
+    }
+
+    // Emit all child nodes directly (no "subdata" nesting)
+    for (const auto& [k, subnode] : node.subdata) {
+        out << YAML::Key << k << YAML::Value;
+        to_yaml(out, subnode);
+    }
+
+    out << YAML::EndMap;
+}
+
+
 // Analysis methods
 Analysis& Analysis::operator+=(const Analysis& other) {
     if (this->keys != other.get_merge_keys()) {

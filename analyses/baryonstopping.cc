@@ -13,7 +13,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <iostream>
-
+/*
 class BaryonStoppingAnalysis : public Analysis {
 public:
     BaryonStoppingAnalysis()
@@ -133,5 +133,5 @@ private:
 };
 
 REGISTER_ANALYSIS("BaryonStopping", BaryonStoppingAnalysis);
-
+*/
 #endif // BARYON_STOPPING_ANALYSIS_H
