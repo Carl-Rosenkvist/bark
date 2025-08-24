@@ -35,10 +35,10 @@ if(WITH_PYBIND)
         OUTPUT_NAME "bark"
     )
 
-    install(TARGETS bark
-        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    )
 
+    install(TARGETS bark
+      LIBRARY DESTINATION ${SKBUILD_PLATLIB_DIR}
+    )
 endif()
 
 # Optional: Tests
