@@ -4,108 +4,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <type_traits>
-
-// MergeKey hash
-std::size_t MergeKeyHash::operator()(const MergeKey& key) const {
-    std::size_t h = 0;
-    for (const auto& [k, v] : key) {
-        h ^= std::hash<std::string>{}(k) ^ (std::hash<MergeKeyValue>{}(v) << 1);
-    }
-    return h;
-}
-
-
-
-
-
-void merge_values(Data& a_val, const Data& b_val, const std::string& context) {
-    
-if (std::holds_alternative<std::monostate>(a_val)) {
-    a_val = b_val;
-    return;
-}
-    if (std::holds_alternative<std::monostate>(b_val)) {
-        return;
-    }
-
-    if (a_val.index() != b_val.index()) {
-        return;
-    }
-
-    std::visit([&](auto& lhs_val) {
-        using T = std::decay_t<decltype(lhs_val)>;
-
-        const auto& rhs_val = std::get<T>(b_val);
-
-        if constexpr (std::is_same_v<T, int> || std::is_same_v<T, double>) {
-            lhs_val += rhs_val;
-
-        } else if constexpr (std::is_same_v<T, std::vector<int>> || std::is_same_v<T, std::vector<double>>) {
-            lhs_val.insert(lhs_val.end(), rhs_val.begin(), rhs_val.end());
-
-        } else if constexpr (std::is_same_v<T, Histogram1D>) {
-            lhs_val += rhs_val;
-
-        } else {
-            // Only merge if exactly equal
-            if (lhs_val != rhs_val) {
-                std::cerr << "❌ merge_values: Conflicting non-leaf values in '" << context << "'\n";
-            }
-        }
-    }, a_val);
-}
-
-
-
-void merge_data(DataNode& a, const DataNode& b) {
-    if (a.name.empty()) a.name = b.name;
-    else if (!b.name.empty() && a.name != b.name) {
-        std::cerr << "⚠️ merge_data: name mismatch: '" << a.name << "' vs '" << b.name << "'\n";
-    }
-
-    // Promote empty node
-    if (std::holds_alternative<std::monostate>(a.value) && a.subdata.empty()) {
-        a = b;
-        return;
-    }
-
-    const bool a_leaf = a.is_leaf();
-    const bool b_leaf = b.is_leaf();
-
-    if (a_leaf && b_leaf) {
-        merge_values(a.value, b.value, a.name);
-    } else if (!a_leaf && !b_leaf) {
-        if (!std::holds_alternative<std::monostate>(a.value) &&
-            !std::holds_alternative<std::monostate>(b.value) &&
-            a.value != b.value) {
-            std::cerr << "❌ merge_data: root value mismatch in '" << a.name << "'\n";
-        }
-    } else if (a_leaf != b_leaf) {
-        std::cerr << "❌ merge_data: mixing leaf/non-leaf nodes in '" << a.name << "'\n";
-    }
-
-    for (const auto& [k, v_sub] : b.subdata) {
-        merge_data(a.subdata[k], v_sub);
-    }
-}
-// Print logic
-void print_data(std::ostream& os, const Data& d) {
-    std::visit([&](const auto& val) {
-        using T = std::decay_t<decltype(val)>;
-        if constexpr (std::is_same_v<T, int> || std::is_same_v<T, double>) {
-            os << val;
-        } else if constexpr (std::is_same_v<T, std::vector<int>> || std::is_same_v<T, std::vector<double>>) {
-            os << "[";
-            for (size_t i = 0; i < val.size(); ++i) {
-                os << val[i];
-                if (i + 1 < val.size()) os << ", ";
-            }
-            os << "]";
-        } else if constexpr (std::is_same_v<T, Histogram1D>) {
-            val.print(os);
-        }
-    }, d);
-}
+#include "analysisregister.h"
 
 // YAML serialization
 void to_yaml(YAML::Emitter& out, const MergeKeyValue& v) {
@@ -114,85 +13,21 @@ void to_yaml(YAML::Emitter& out, const MergeKeyValue& v) {
     }, v);
 }
 
-void to_yaml(YAML::Emitter& out, const Data& d) {
-    std::visit([&](const auto& val) {
-        using T = std::decay_t<decltype(val)>;
-
-        if constexpr (std::is_same_v<T, int> || std::is_same_v<T, double>) {
-            out << val;
-
-        } else if constexpr (std::is_same_v<T, std::vector<int>> ||
-                             std::is_same_v<T, std::vector<double>>) {
-            out << YAML::BeginSeq;
-            for (const auto& item : val) out << item;
-            out << YAML::EndSeq;
-
-        } else if constexpr (std::is_same_v<T, Histogram1D>) {
-            out << YAML::BeginMap;
-
-            std::vector<double> edges;   edges.reserve(val.num_bins() + 1);
-            std::vector<double> counts;  counts.reserve(val.num_bins());
-
-            for (size_t i = 0; i < val.num_bins(); ++i) {
-                edges.push_back(val.bin_edge(i));         // left edge of bin i
-                counts.push_back(val.get_bin_count(i));   // count of bin i
-            }
-            if (val.num_bins() > 0) {
-                edges.push_back(val.bin_edge(val.num_bins())); // rightmost edge
-            }
-
-            out << YAML::Key << "bins"   << YAML::Value << edges;   // length = N+1
-            out << YAML::Key << "values" << YAML::Value << counts;  // length = N
-            out << YAML::EndMap;
-
-        } else {
-            throw std::runtime_error("Unsupported Data type for YAML");
-        }
-    }, d);
-}
-
-
-
-void to_yaml(YAML::Emitter& out, const DataNode& node) {
-    out << YAML::BeginMap;
-
-    // If the node has a value (i.e. is a leaf), emit it directly under "value"
-    if (!std::holds_alternative<std::monostate>(node.value)) {
-        out << YAML::Key << "value" << YAML::Value;
-        to_yaml(out, node.value);
-    }
-
-    // Emit all child nodes directly (no "subdata" nesting)
-    for (const auto& [k, subnode] : node.subdata) {
-        out << YAML::Key << k << YAML::Value;
-        to_yaml(out, subnode);
-    }
-
-    out << YAML::EndMap;
-}
-
-
 // Analysis methods
 Analysis& Analysis::operator+=(const Analysis& other) {
     if (this->keys != other.get_merge_keys()) {
         throw std::runtime_error("Cannot merge Analysis objects: MergeKey mismatch.");
     }
 
-    for (const auto& [k, v] : other.data) {
-        if (data.count(k)) {
-            merge_data(data[k], v);
-        } else {
-            data[k] = v;
-        }
-    }
+    this->dataNode += other.dataNode;
     return *this;
 }
 
-void Analysis::set_merge_keys(MergeKey k) {
+void Analysis::set_merge_keys(MergeKeySet k) {
     keys = std::move(k);
 }
 
-const MergeKey& Analysis::get_merge_keys() const {
+const MergeKeySet& Analysis::get_merge_keys() const {
     return keys;
 }
 
@@ -212,12 +47,17 @@ void Analysis::save_as_yaml(const std::string& filename) const {
     }
     out << YAML::EndMap;
 
-    out << YAML::Key << "data" << YAML::Value << YAML::BeginMap;
-    for (const auto& [k, v] : data) {
-        out << YAML::Key << k << YAML::Value;
-        to_yaml(out, v);
+    out << YAML::Key << "data" << YAML::Value;
+    if (dataNode.empty()) {
+        out << YAML::BeginMap << YAML::EndMap;
+    } else {
+        out << YAML::BeginMap;
+        for (const auto& [k, v] : dataNode.children()) {
+            out << YAML::Key << YAML::DoubleQuoted << k << YAML::Value;
+            to_yaml(out, v);
+        }
+        out << YAML::EndMap;
     }
-    out << YAML::EndMap;
 
     out << YAML::EndMap;
 
@@ -244,4 +84,168 @@ void DispatchingAccessor::on_header(Header& header) {
     for (auto& a : analyses) {
         a->on_header(header);
     }
+}
+
+void run_analysis(const std::vector<std::pair<std::string, std::string>>& file_and_meta,
+                  const std::string& analysis_name,
+                  const std::vector<std::string>& quantities,
+                  bool save_output,
+                  bool print_output,
+                  const std::string& output_folder)
+{
+    if (quantities.empty()) throw std::runtime_error("No quantities provided");
+
+    if (save_output) {
+        std::error_code ec;
+        std::filesystem::create_directories(output_folder, ec);
+        if (ec) throw std::runtime_error("create_directories failed: " + ec.message());
+    }
+
+    std::vector<std::pair<std::string, MergeKeySet>> input_files;
+    input_files.reserve(file_and_meta.size());
+    for (const auto& [file, meta] : file_and_meta) {
+        MergeKeySet ks = parse_merge_key(meta);
+        sort_keyset(ks);
+        input_files.emplace_back(file, std::move(ks));
+    }
+
+    std::vector<Entry> results;
+    results.reserve(input_files.size());
+
+    auto find_or_insert = [&](MergeKeySet k) -> std::shared_ptr<Analysis>& {
+        auto it = std::lower_bound(results.begin(), results.end(), k,
+            [](Entry const& e, MergeKeySet const& x){ return e.key < x; });
+        if (it == results.end() || it->key < k || k < it->key) {
+            it = results.insert(it, Entry{std::move(k), nullptr});
+        }
+        return it->analysis;
+    };
+
+    for (auto& [path, key] : input_files) {
+        auto analysis = AnalysisRegistry::instance().create(analysis_name);
+        if (!analysis) throw std::runtime_error("Unknown analysis: " + analysis_name);
+
+        analysis->set_merge_keys(key);
+
+        auto dispatcher = std::make_shared<DispatchingAccessor>();
+        dispatcher->register_analysis(analysis);
+
+        BinaryReader reader(path, quantities, dispatcher);
+        reader.read();
+
+        auto& slot = find_or_insert(std::move(key));
+        if (slot) {
+            *slot += *analysis;
+        } else {
+            slot = std::move(analysis);
+        }
+    }
+
+    for (auto& e : results) {
+        e.analysis->finalize();
+        if (print_output) {
+            const std::string label = label_from_keyset(e.key);
+            std::cout << "=== Result for " << (label.empty() ? "(no key)" : label) << " ===\n";
+            e.analysis->print_result_to(std::cout);
+        }
+    }
+
+    if (save_output) {
+        std::filesystem::path out = std::filesystem::path(output_folder) / (analysis_name + ".yaml");
+        save_all_to_yaml(out.string(), results);
+    }
+}
+
+MergeKeySet parse_merge_key(const std::string& meta) {
+    MergeKeySet ks;
+    if (meta.empty()) return ks;
+
+    std::stringstream ss(meta);
+    std::string item;
+    while (std::getline(ss, item, ',')) {
+        auto eq = item.find('=');
+        if (eq == std::string::npos) continue;
+        std::string name = item.substr(0, eq);
+        std::string val  = item.substr(eq + 1);
+
+        try {
+            if (val.find('.') != std::string::npos) {
+                ks.emplace_back(name, std::stod(val));
+            } else {
+                try {
+                    ks.emplace_back(name, std::stoi(val));
+                } catch (...) {
+                    ks.emplace_back(name, std::stod(val));
+                }
+            }
+        } catch (...) {
+            ks.emplace_back(name, val);
+        }
+    }
+    sort_keyset(ks);
+    return ks;
+}
+
+void sort_keyset(MergeKeySet& k) {
+    std::sort(k.begin(), k.end(), [](auto const& a, auto const& b){
+        if (a.name != b.name) return a.name < b.name;
+        return a.value < b.value;
+    });
+}
+
+bool ends_with(const std::string& str, const std::string& suffix) {
+    return str.size() >= suffix.size() &&
+           str.compare(str.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+std::string label_from_keyset(const MergeKeySet& ks) {
+    std::ostringstream oss;
+    for (size_t i = 0; i < ks.size(); ++i) {
+        if (i) oss << " | ";
+        oss << ks[i].name << "=";
+        std::visit([&](auto const& x){ oss << x; }, ks[i].value);
+    }
+    return oss.str();
+}
+
+void save_all_to_yaml(const std::string& filename,
+                      const std::vector<Entry>& results)
+{
+    YAML::Emitter out;
+    out << YAML::BeginMap;
+    out << YAML::Key << "results" << YAML::Value << YAML::BeginSeq;
+
+    for (const auto& e : results) {
+        out << YAML::BeginMap;
+
+        out << YAML::Key << "merge_keys" << YAML::Value << YAML::BeginMap;
+        for (const auto& kv : e.key) {
+            out << YAML::Key << kv.name << YAML::Value;
+            std::visit([&](auto const& x){ out << x; }, kv.value);
+        }
+        out << YAML::EndMap;
+
+        out << YAML::Key << "smash_version" << YAML::Value
+            << e.analysis->get_smash_version();
+
+        out << YAML::Key << "data" << YAML::Value;
+        if (e.analysis->get_data().empty()) {
+            out << YAML::BeginMap << YAML::EndMap;
+        } else {
+            out << YAML::BeginMap;
+            for (const auto& [k, v] : e.analysis->get_data().children()) {
+                to_yaml(out, v);
+            }
+            out << YAML::EndMap;
+        }
+
+        out << YAML::EndMap;
+    }
+
+    out << YAML::EndSeq;
+    out << YAML::EndMap;
+
+    std::ofstream fout(filename);
+    if (!fout) throw std::runtime_error("Failed to open " + filename);
+    fout << out.c_str();
 }

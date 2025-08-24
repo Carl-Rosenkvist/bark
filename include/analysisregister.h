@@ -26,15 +26,13 @@ private:
 
 
 #define REGISTER_ANALYSIS(NAME, CLASS)                           \
-    namespace {                                                  \
-        const bool _registered_##CLASS = []() {                  \
-            AnalysisRegistry::instance().register_factory(       \
-                NAME, []() -> std::shared_ptr<Analysis> {        \
-                    return std::make_shared<CLASS>();            \
-                });                                              \
-            return true;                                         \
-        }();                                                     \
-    }
-
+    static bool _registered_##CLASS = []() {                     \
+        AnalysisRegistry::instance().register_factory(           \
+            NAME, []() -> std::shared_ptr<Analysis> {            \
+                return std::make_shared<CLASS>();                \
+            });                                                  \
+        return true;                                             \
+    }();                                                         \
+    static const void* _anchor_##CLASS = &_registered_##CLASS;
 
 #endif // ANALYSIS_REGISTRY_H

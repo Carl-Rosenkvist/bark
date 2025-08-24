@@ -1,44 +1,46 @@
 #include <iostream>
-#include <memory>
-#include <vector>
 #include <string>
-#include <unordered_map>
+#include <vector>
 #include <filesystem>
-#include <sstream>
-#include <variant>
-#include "binaryreader.h"
-#include "analysis.h"
-#include "analysisregister.h"
-#include "utils.h"
+
+#include "analysis.h"          // run_analysis(...)
+                                // parse_merge_key is called inside run_analysis
+#include "analysisregister.h"  // for list_registered()
+
 int main(int argc, char* argv[]) {
+    if (argc > 1 && std::string(argv[1]) == "--list-analyses") {
+        const auto registered = AnalysisRegistry::instance().list_registered();
+        std::cout << "Available analyses:\n";
+        for (const auto& name : registered) {
+            std::cout << " - " << name << "\n";
+        }
+        return 0;
+    }
+
     if (argc < 4) {
         std::cerr << "Usage: " << argv[0]
                   << " <file[:key=val,...]>... <analysis> <quantities...>"
-                  << " [--no-save] [--no-print] [--output-folder <path>]\n";
+                  << " [--no-save] [--no-print] [--output-folder <path>]\n"
+                  << "       or: " << argv[0] << " --list-analyses\n";
         return 1;
     }
 
-    std::vector<std::pair<std::string, MergeKey>> input_files;
-    std::string analysis_name;
-    std::vector<std::string> quantities;
-    bool save_output = true, print_output = true;
-    std::filesystem::path output_folder = ".";
-
+    // ... (rest of main unchanged)
+    // Collect (file, meta) pairs — meta is the substring after ':' (or empty)
+    std::vector<std::pair<std::string, std::string>> file_and_meta;
     int i = 1;
-    // Parse input files with optional :key=val
     for (; i < argc; ++i) {
         std::string arg = argv[i];
+        // treat anything with ":" or ending in ".bin" as an input spec
         if (ends_with(arg, ".bin") || arg.find(':') != std::string::npos) {
             auto pos = arg.find(':');
             if (pos == std::string::npos) {
-                input_files.emplace_back(arg, MergeKey{});
+                file_and_meta.emplace_back(arg, std::string{});
             } else {
-                std::string file = arg.substr(0, pos);
-                MergeKey key = parse_merge_key(arg.substr(pos + 1));
-                input_files.emplace_back(file, key);
+                file_and_meta.emplace_back(arg.substr(0, pos), arg.substr(pos + 1));
             }
         } else {
-            break;
+            break; // next token should be the analysis name
         }
     }
 
@@ -46,8 +48,13 @@ int main(int argc, char* argv[]) {
         std::cerr << "Error: No analysis specified.\n";
         return 1;
     }
+    const std::string analysis_name = argv[i++];
 
-    analysis_name = argv[i++];
+    // Flags and quantities
+    bool save_output = true;
+    bool print_output = true;
+    std::filesystem::path output_folder = ".";
+    std::vector<std::string> quantities;
 
     for (; i < argc; ++i) {
         std::string arg = argv[i];
@@ -62,58 +69,20 @@ int main(int argc, char* argv[]) {
             }
             output_folder = argv[++i];
         } else {
-            quantities.push_back(arg);
+            quantities.push_back(std::move(arg));
         }
     }
 
-    if (quantities.empty()) {
-        std::cerr << "Error: No quantities provided.\n";
+    try {
+        run_analysis(file_and_meta,
+                     analysis_name,
+                     quantities,
+                     save_output,
+                     print_output,
+                     output_folder.string());
+    } catch (const std::exception& e) {
+        std::cerr << "run_analysis failed: " << e.what() << "\n";
         return 1;
     }
-
-    if (save_output && !std::filesystem::exists(output_folder)) {
-        std::filesystem::create_directories(output_folder);
-    }
-
-    std::unordered_map<MergeKey, std::shared_ptr<Analysis>, MergeKeyHash> analysis_map;
-
-    for (const auto& [path, key] : input_files) {
-        auto analysis = AnalysisRegistry::instance().create(analysis_name);
-        if (!analysis) {
-            std::cerr << "Unknown analysis: " << analysis_name << "\n";
-            return 1;
-        }
-        analysis->set_merge_keys(key);
-
-        auto dispatcher = std::make_shared<DispatchingAccessor>();
-        dispatcher->register_analysis(analysis);
-
-        BinaryReader reader(path, quantities, dispatcher);
-        reader.read();
-
-        auto& existing = analysis_map[key];
-        if (existing) {
-            *existing += *analysis;
-        } else {
-            analysis_map[key] = std::move(analysis);
-        }
-    }
-
-    for (const auto& [key, analysis] : analysis_map) {
-        analysis->finalize();
-        std::string label = label_from_key(key);
-
-   
-        if (save_output) {
-            std::filesystem::path filename = output_folder / (analysis_name + ".yaml");
-            
-            save_all_to_yaml(filename.string(), analysis_map);
-        }
-        if (print_output) {
-            std::cout << "=== Result for " << (label.empty() ? "(no key)" : label) << " ===\n";
-            analysis->print_result_to(std::cout);
-        }
-    }
-
     return 0;
 }

@@ -6,6 +6,7 @@
 #include <iomanip>
 #include <stdexcept>
 
+#include <yaml-cpp/yaml.h>
 class Histogram1D {
 public:
     Histogram1D(double min, double max, size_t bins)
@@ -88,4 +89,21 @@ inline bool operator==(const Histogram1D& lhs, const Histogram1D& rhs) {
 inline bool operator!=(const Histogram1D& lhs, const Histogram1D& rhs) {
     return !(lhs == rhs);
 }
+
+
+inline void to_yaml(YAML::Emitter& out, const Histogram1D& h)
+{
+    out << YAML::BeginMap;
+  // out << YAML::Key << "min"       << YAML::Value << h.bin_edge(0);
+   // out << YAML::Key << "max"       << YAML::Value << h.bin_edge(h.num_bins());
+   // out << YAML::Key << "bin_width" << YAML::Value << h.bin_width();
+    out << YAML::Key << "counts"    << YAML::Value << YAML::Flow << YAML::BeginSeq;
+    for (size_t i = 0; i < h.num_bins(); ++i) {
+        out << h.raw_bin_content(i);
+    }
+    out << YAML::EndSeq;
+    out << YAML::EndMap;
+}
+
+
 #endif // HISTOGRAM1D_H

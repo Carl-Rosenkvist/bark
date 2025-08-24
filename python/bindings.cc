@@ -2,7 +2,6 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/numpy.h>
-#include "utils.h"
 #include <filesystem>
 
 
@@ -20,64 +19,6 @@ namespace py = pybind11;
 
 
 #include <sstream>
-
-void run_analysis(const std::vector<std::pair<std::string, std::string>>& file_and_meta,
-                  const std::string& analysis_name,
-                  const std::vector<std::string>& quantities,
-                  bool save_output = true,
-                  bool print_output = true,
-                  const std::string& output_folder = ".")
-{
-    std::vector<std::pair<std::string, MergeKey>> input_files;
-    for (const auto& [file, meta] : file_and_meta) {
-        input_files.emplace_back(file, parse_merge_key(meta));
-    }
-
-    if (quantities.empty()) {
-        throw std::runtime_error("No quantities provided");
-    }
-
-    if (save_output && !std::filesystem::exists(output_folder)) {
-        std::filesystem::create_directories(output_folder);
-    }
-
-    std::unordered_map<MergeKey, std::shared_ptr<Analysis>, MergeKeyHash> analysis_map;
-
-    for (const auto& [path, key] : input_files) {
-        auto analysis = AnalysisRegistry::instance().create(analysis_name);
-        if (!analysis) {
-            throw std::runtime_error("Unknown analysis: " + analysis_name);
-        }
-        analysis->set_merge_keys(key);
-
-        auto dispatcher = std::make_shared<DispatchingAccessor>();
-        dispatcher->register_analysis(analysis);
-
-        BinaryReader reader(path, quantities, dispatcher);
-        reader.read();
-
-        auto& existing = analysis_map[key];
-        if (existing) {
-            *existing += *analysis;
-        } else {
-            analysis_map[key] = std::move(analysis);
-        }
-    }
-
-    for (const auto& [key, analysis] : analysis_map) {
-        analysis->finalize();
-        std::string label = label_from_key(key);
-
-        if (save_output) {
-            std::filesystem::path filename = std::filesystem::path(output_folder) / (analysis_name + ".yaml");
-            save_all_to_yaml(filename.string(), analysis_map);
-        }
-        if (print_output) {
-            std::cout << "=== Result for " << (label.empty() ? "(no key)" : label) << " ===\n";
-            analysis->print_result_to(std::cout);
-        }
-    }
-}
 
 
 class CollectorAccessor : public Accessor {

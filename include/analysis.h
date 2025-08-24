@@ -1,79 +1,85 @@
 #ifndef ANALYSIS_H
 #define ANALYSIS_H
 
-#include "binaryreader.h"
-#include "histogram1d.h"
-#include <memory>
-#include <vector>
-#include <variant>
-#include <string>
-#include <map>
-#include <unordered_map>
+#include <cmath>                 // std::round (used in MergeKey ctor)
 #include <filesystem>
+#include <map>
+#include <memory>
+#include <string>
+#include <variant>
+#include <vector>
+
 #include <yaml-cpp/yaml.h>
 
-// Merge keys
+#include "binaryreader.h"
+#include "histogram1d.h"
+#include "datatree.h"
+// ---------- Merge keys (vector of name/value pairs) ----------
 using MergeKeyValue = std::variant<int, double, std::string>;
-using MergeKey = std::unordered_map<std::string, MergeKeyValue>;
-struct MergeKeyHash {
-    std::size_t operator()(const MergeKey& key) const;
-};
 
-// Flat data variant
-using Data = std::variant<
-    std::monostate, // Empty/default
-    int,
-    double,
-    std::vector<int>,
-    std::vector<double>,
-    Histogram1D>;
-
-
-
-// Node structure
-struct DataNode {
+struct MergeKey {
     std::string name;
-    Data value;
-    std::map<std::string, DataNode> subdata;
+    std::variant<int, double, std::string> value;
 
-    DataNode() = default;
-    DataNode(std::string n) : name(std::move(n)) {}
-    DataNode(std::string n, Data v) : name(std::move(n)), value(std::move(v)) {}
-
-    bool is_leaf() const { return std::holds_alternative<std::monostate>(value) == false; }
+    explicit MergeKey(std::string n, std::variant<int,double,std::string> v)
+      : name(std::move(n)),
+        value(std::visit([](auto x)->decltype(value){
+            using T = std::decay_t<decltype(x)>;
+            if constexpr (std::is_same_v<T,double>) {
+                double s = 1000.0; // 3 decimals
+                return std::round(x*s)/s;
+            } else {
+                return x;
+            }
+        }, v)) {}
 };
 
-
-template <typename T>
-DataNode make_node(std::string name, T val) {
-    return DataNode{.name = std::move(name), .value = std::move(val)};
+inline bool operator<(MergeKey const& a, MergeKey const& b) {
+    if (a.name != b.name) return a.name < b.name;
+    return a.value < b.value; // variant orders by index, then value
+}
+inline bool operator==(MergeKey const& a, MergeKey const& b) {
+    return a.name == b.name && a.value == b.value;
 }
 
+using MergeKeySet = std::vector<MergeKey>;
 
-void merge_values(Data& a_val, const Data& b_val, const std::string& context = "");
-void merge_data(DataNode& a, const DataNode& b);
+inline bool operator<(MergeKeySet const& A, MergeKeySet const& B) {
+    return std::lexicographical_compare(A.begin(), A.end(), B.begin(), B.end());
+}
+inline bool operator==(MergeKeySet const& A, MergeKeySet const& B) {
+    return A.size() == B.size() && std::equal(A.begin(), A.end(), B.begin());
+}
 
-void to_yaml(YAML::Emitter& out, const DataNode& node);
 void to_yaml(YAML::Emitter& out, const MergeKeyValue& v);
 
-// Base class
+// Helpers (you can also keep these in utils.h if you prefer)
+MergeKeySet parse_merge_key(const std::string& meta);
+void sort_keyset(MergeKeySet& k);
+bool ends_with(const std::string& str, const std::string& suffix);
+std::string label_from_keyset(const MergeKeySet& ks);
+
+// ---------- Analysis base ----------
 class Analysis {
 protected:
-    MergeKey keys;
+    MergeKeySet keys;
     std::string smash_version;
-    std::map<std::string, DataNode> data;
+    DataNode dataNode;
 
 public:
     virtual ~Analysis() = default;
     Analysis& operator+=(const Analysis& other);
 
-    void set_merge_keys(MergeKey k);
-    const MergeKey& get_merge_keys() const;
+    void set_merge_keys(MergeKeySet k);
+    const MergeKeySet& get_merge_keys() const;
 
     void on_header(Header& header);
     void save_as_yaml(const std::string& filename) const;
 
-    const std::map<std::string, DataNode>& get_data() const { return data; }
+    const DataNode& get_data() const { return dataNode; }
+    DataNode& get_data(){ return dataNode; }
+
+
     const std::string& get_smash_version() const { return smash_version; }
 
     virtual void analyze_particle_block(const ParticleBlock& block, const Accessor& accessor) = 0;
@@ -82,7 +88,7 @@ public:
     virtual void print_result_to(std::ostream& os) const {}
 };
 
-// Dispatcher
+// ---------- Dispatcher ----------
 class DispatchingAccessor : public Accessor {
 public:
     void register_analysis(std::shared_ptr<Analysis> analysis);
@@ -92,6 +98,23 @@ public:
 
 private:
     std::vector<std::shared_ptr<Analysis>> analyses;
+}; 
+
+// ---------- Result entry + run ----------
+struct Entry {
+    MergeKeySet key;
+    std::shared_ptr<Analysis> analysis;
 };
+
+// Write one YAML with all entries (deterministic order)
+void save_all_to_yaml(const std::string& filename,
+                      const std::vector<Entry>& results);
+
+void run_analysis(const std::vector<std::pair<std::string, std::string>>& file_and_meta,
+                  const std::string& analysis_name,
+                  const std::vector<std::string>& quantities,
+                  bool save_output = true,
+                  bool print_output = true,
+                  const std::string& output_folder = ".");
 
 #endif // ANALYSIS_H
