@@ -30,10 +30,15 @@ if(WITH_PYBIND)
     )
     target_include_directories(bark PRIVATE include)
     target_link_libraries(bark PRIVATE yaml-cpp pybind11::module)
+   
     set_target_properties(bark PROPERTIES
         OUTPUT_NAME "bark"
-        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/python/bark"
     )
+
+    install(TARGETS bark
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    )
+
 endif()
 
 # Optional: Tests
